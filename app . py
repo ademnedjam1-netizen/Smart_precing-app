@@ -1,0 +1,84 @@
+import streamlit as st
+from dataclasses import dataclass
+
+st.set_page_config(page_title="Smart Pricing", page_icon="💰", layout="centered")
+
+@dataclass
+class PricingInput:
+    product_name: str
+    unit_cost: float
+    base_price: float
+    base_demand: float
+    target_margin: float = 0.30
+    competitor_price: float | None = None
+    price_elasticity: float = -1.5
+    stock_level: int = 100
+    reorder_point: int = 20
+    min_margin: float = 0.15
+
+def estimate_demand(base_demand: float, base_price: float, new_price: float, elasticity: float) -> float:
+    return max(0.0, base_demand * ((new_price / base_price) ** elasticity))
+
+def calculate_smart_price(data: PricingInput):
+    rationale = []
+    cost_plus_price = data.unit_cost / (1.0 - data.target_margin)
+    candidate_price = max(data.base_price, cost_plus_price)
+    rationale.append(f"السعر الأساسي حسب الهامش ({data.target_margin:.0%}): {candidate_price:.2f}")
+
+    if data.competitor_price and data.competitor_price > 0:
+        candidate_price = 0.75 * candidate_price + 0.25 * data.competitor_price
+        rationale.append(f"تعديل نحو سعر المنافس ({data.competitor_price:.2f}): {candidate_price:.2f}")
+
+    if data.stock_level <= data.reorder_point:
+        candidate_price *= 1.08
+        rationale.append(f"المخزون قليل ({data.stock_level}): زيادة +8% -> {candidate_price:.2f}")
+    elif data.stock_level >= data.reorder_point * 5:
+        candidate_price *= 0.95
+        rationale.append(f"المخزون كبير ({data.stock_level}): تخفيض -5% -> {candidate_price:.2f}")
+
+    floor_price = data.unit_cost / (1.0 - data.min_margin)
+    if candidate_price < floor_price:
+        candidate_price = floor_price
+        rationale.append(f"تطبيق الحد الأدنى للربح ({data.min_margin:.0%}): {candidate_price:.2f}")
+
+    rec_price = round(candidate_price, 2)
+    demand = estimate_demand(data.base_demand, data.base_price, rec_price, data.price_elasticity)
+    revenue = rec_price * demand
+    profit = (rec_price - data.unit_cost) * demand
+    margin = (rec_price - data.unit_cost) / rec_price
+
+    return rec_price, demand, revenue, profit, margin, rationale
+
+st.title("💰 Smart Pricing Assistant")
+name = st.text_input("اسم المنتج", "Wireless Ergonomic Mouse")
+
+unit_cost = st.number_input("تكلفة الوحدة", min_value=0.1, value=18.0, step=0.5)
+base_price = st.number_input("السعر الحالي", min_value=0.1, value=29.99, step=0.5)
+comp_price = st.number_input("سعر المنافس (0 إذا لا يوجد)", min_value=0.0, value=32.50, step=0.5)
+base_demand = st.number_input("المبيعات الشهرية المتوقعة", min_value=1.0, value=250.0, step=10.0)
+stock_level = st.number_input("الكمية في المخزون", min_value=0, value=15, step=1)
+reorder_point = st.number_input("حد إعادة الطلب", min_value=1, value=20, step=1)
+
+target_margin = st.slider("الهامش الربحي المستهدف (%)", 5, 80, 35) / 100
+elasticity = st.slider("مرونة الطلب (Elasticity)", -3.0, -0.2, -1.4, 0.1)
+
+if st.button("احسب السعر الذكي 🚀", use_container_width=True):
+    item = PricingInput(
+        product_name=name,
+        unit_cost=unit_cost,
+        base_price=base_price,
+        base_demand=base_demand,
+        target_margin=target_margin,
+        competitor_price=comp_price if comp_price > 0 else None,
+        price_elasticity=elasticity,
+        stock_level=int(stock_level),
+        reorder_point=int(reorder_point),
+    )
+    rec_price, demand, revenue, profit, margin, rationale = calculate_smart_price(item)
+
+    st.success(f"### السعر المقترح: {rec_price:.2f} (هامش {margin:.1%})")
+    st.write(f"**الطلب المتوقع:** {demand:.0f} وحدة | **المداخيل:** {revenue:.0f} | **الربح الصافي:** {profit:.0f}")
+
+    with st.expander("تفاصيل الحساب"):
+        for r in rationale:
+            st.write("•", r)
